@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gold Mining Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB;
+            font-family: Arial, sans-serif;
+        }
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            margin: 20px auto;
+            background-color: #5c4033;
+            border: 4px solid #3b2314;
+            overflow: hidden;
+        }
+        #status-bar {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background-color: #3b2314;
+            color: white;
+        }
+        #game-over, #level-complete {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #FFD700;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        #instructions {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="status-bar">
+            <div>Score: <span id="score">0</span></div>
+            <div>Lives: <span id="lives">5</span></div>
+            <div>Time: <span id="timer">60</span></div>
+        </div>
+        <canvas id="game-canvas" width="800" height="560"></canvas>
+        <div id="game-over">
+            <h2>Game Over!</h2>
+            <p>Your final score: <span id="final-score">0</span></p>
+            <button id="restart-button">Play Again</button>
+        </div>
+        <div id="level-complete">
+            <h2>Level Complete!</h2>
+            <p>Your score: <span id="level-score">0</span></p>
+            <button id="next-level-button">Next Level</button>
+        </div>
+        <div id="instructions">
+            <p>← → Arrow keys: Move cart</p>
+            <p>Space bar: Drop/Retract hook</p>
+            <p>Collect gold (+100pts), avoid stones (lose a life)</p>
+        </div>
+    </div>
+
+    <script>
+        // Game variables
+        const canvas = document.getElementById("game-canvas");
+        const ctx = canvas.getContext("2d");
+        const scoreDisplay = document.getElementById("score");
+        const livesDisplay = document.getElementById("lives");
+        const timerDisplay = document.getElementById("timer");
+        const gameOverScreen = document.getElementById("game-over");
+        const levelCompleteScreen = document.getElementById("level-complete");
+        const finalScoreDisplay = document.getElementById("final-score");
+        const levelScoreDisplay = document.getElementById("level-score");
+        const restartButton = document.getElementById("restart-button");
+        const nextLevelButton = document.getElementById("next-level-button");
+
+        // Game state
+        let gameState = {
+            score: 0,
+            lives: 5,
+            level: 1,
+            timeRemaining: 60,
+            isGameOver: false,
+            isPaused: false,
+            isHookDropping: false,
+            isHookRetracting: false,
+            isHookCarrying: null,
+            hookExtension: 0,
+            maxHookExtension: 400
+        };
+
+        // Game objects
+        const cart = {
+            x: canvas.width / 2 - 50,
+            y: 50,
+            width: 100,
+            height: 60,
+            speed: 5,
+            direction: 1
+        };
+
+        const miner = {
+            x: cart.x + 10,
+            y: cart.y + 10,
+            width: 50,
+            height: 50,
+            image: new Image()
+        };
+        miner.image.src = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj48c3R5bGU+LnN0MHtmaWxsOiNFNjk4NEZ9LnN0MXtmaWxsOiNDNzZCMjF9LnN0MntmaWxsOiNGRkIxNjl9LnN0M3tmaWxsOiNGRkZGMDB9PC9zdHlsZT48cGF0aCBjbGFzcz0ic3QwIiBkPSJNNDAgNzBjLTUuNSAzLjUtOC4zIDEwLjgtNyAxOCA1IDI4IDI3IDQyIDI3IDQyIDE1IDE1IDMwIDE4IDMwIDE4IDUgMSAxMyAyIDEzIDJsNyAyOGMwIDUtMSAxMiAwIDE2IDIgNyAxMiA2IDEyIDAgMC0xMC04LTQ1LTgtNDVsMzMtN0MxNTIgMTQwIDE2MCAxMjggMTYwIDEyMGwzMC00cy0xMC0xNi0xMC0xNi0xMC0xMy0xMC0xM2MtMTAtMTUtMzAtMjAtMzAtMjBsLTIwLTZjLTYtMi0xNSAzLTE1IDNsLTE1IDYtMjAtMTAtMzAgMTB6Ii8+PHBhdGggY2xhc3M9InN0MSIgZD0iTTQwIDcwczMgMTUgMTAgMjBjNyA1IDE3IDE1IDE3IDE1bDEwLTE1LTEyLTI1TDQwIDcweiIvPjxwYXRoIGNsYXNzPSJzdDEiIGQ9Ik01MCA3MGw1IDE1IDI1IDUgNS0xMC0xNS0xNS0yMCA1eiIvPjxwYXRoIGNsYXNzPSJzdDEiIGQ9Ik02MCA1MGwxNSAxNSAyMC01VjQwTDgwIDMwIDYwIDUweiIvPjxwYXRoIGNsYXNzPSJzdDEiIGQ9Ik05NSA2MGwtNSAxNSAxMCAxMCAxNSA1IDUtMTUtNS0yMC0yMCA1eiIvPjxwYXRoIGNsYXNzPSJzdDEiIGQ9Ik0xMTAgNzVsLTUgMTUgMTAgMTUgMTUgMCA1LTE1YzAgMC01LTE1LTUtMTVsLTIwIDB6Ii8+PHBhdGggY2xhc3M9InN0MSIgZD0iTTExNSAxMDVsLTUgMTAgNSAxNSAxNSA1IDEwLTE1YzAgMC01LTE1LTUtMTVsLTIwIDB6Ii8+PHBhdGggY2xhc3M9InN0MSIgZD0iTTEzMCAxMDBjMCAwIDEwIDAgMTUgNSA1IDUgMTUgMTUgMTUgMTVsLTIwIDEwLTIwLTEwYzAgMCAxMC0yMCAxMC0yMHoiLz48cGF0aCBjbGFzcz0ic3QxIiBkPSJNOTUgNjBjMCAwIDE1LTUgMTUtNSAxMC01IDIwLTUgMjAtNWwxNSAxNS0xNSAxMC0yMC01Yy0xMC0xLTE1LTEwLTE1LTEweiIvPjxwYXRoIGNsYXNzPSJzdDEiIGQ9Ik0xMzAgNTBjLTUgMC0xMC01LTEwLTVsNS0xNWMwIDAgMTAtNSAyMCA1bDUgMTUtMjAgMHoiLz48cGF0aCBjbGFzcz0ic3QxIiBkPSJNNjAgMTI1czEwIDEwIDIwIDEwYzEwIDAgMTAgMTAgMTAgMTBsNyAyOGMwIDAgLTcgNy0xNyAybC0yMC01MCIvPjxwYXRoIGNsYXNzPSJzdDEiIGQ9Ik01MCAxNDBjMCAwIDAgMTAgMTAgMTVsMTAgMjUgMTAgMTBjMCAwLTUtMTAtNS0xNWwtNS0yNWMwIDAtMTAtMTAtMjAtMTAiLz48cGF0aCBjbGFzcz0ic3QyIiBkPSJNNDMgNzVjMCAwLTMgMTAgNyAxNWwxNyAxMCA4LTEwLTEwLTIwLTIyIDV6Ii8+PHBhdGggY2xhc3M9InN0MiIgZD0iTTUyIDcyYzAgMCAwIDEzIDIwIDEzbDUtOS0xMC0xNC0xNSAxMHoiLz48cGF0aCBjbGFzcz0ic3QyIiBkPSJNNjMgNTVjMCAwIDUgMTUgMjAgMTBsNy0xMC01LTEzLTEyLTctMTAgMjB6Ii8+PHBhdGggY2xhc3M9InN0MiIgZD0iTTk3IDYzYzAgMCAwIDEyIDIwIDEybDUtMTAtNS0xNS0yMCAxM3oiLz48cGF0aCBjbGFzcz0ic3QyIiBkPSJNMTE1IDc4YzAgMCAwIDEyIDEzIDEybDctMTAtNS0xMi0xNSAxMHoiLz48cGF0aCBjbGFzcz0ic3QyIiBkPSJNMTE4IDEwOGMwIDAgMCAxMCAxMyAxM2w3LTEwLTUtMTMtMTUgMTB6Ii8+PHBhdGggY2xhc3M9InN0MiIgZD0iTTEzMyAxMDNjMCAwIDcgMCAxNyAxM2wtMTUgOS0xMi0xMCAxMC0xMnoiLz48cGF0aCBjbGFzcz0ic3QyIiBkPSJNMTAwIDYzYzAgMCAxMC04IDMwLTNsNyAxMC0xMCA4LTE3LTMtMTAtMTJ6Ii8+PHBhdGggY2xhc3M9InN0MiIgZD0iTTEzMyA1M2MtMyAwLTEzLTMtMTMtM2wzLTEzYzAgMCAxMC01IDE3IDNsMyAxMy0xMCAweiIvPjxwYXRoIGNsYXNzPSJzdDIiIGQ9Ik04MCAxMzVsLTMtMTVjMCAwIDEwIDcgMTMgNyAzIDAgNSA1IDUgNWwyNSA0M2MwIDAtMTAgMTAtMjAgMGwtMjAtNDB6Ii8+PHBhdGggY2xhc3M9InN0MiIgZD0iTTYwIDE0NWMwIDAgMCAxMCA3IDE1bDEwIDI1YzAgMCA3IDEwIDEzIDVsMTAtMTVjMCAwLTEwLTI1LTEwLTI1bC0zMC01eiIvPjxjaXJjbGUgY2xhc3M9InN0MyIgY3g9IjkwIiBjeT0iNTgiIHI9IjMiLz48Y2lyY2xlIGNsYXNzPSJzdDMiIGN4PSI4MyIgY3k9IjY1IiByPSIzIi8+PGNpcmNsZSBjbGFzcz0ic3QzIiBjeD0iOTAiIGN5PSI3MCIgcj0iMyIvPjxjaXJjbGUgY2xhc3M9InN0MyIgY3g9Ijk4IiBjeT0iNjUiIHI9IjMiLz48Y2lyY2xlIGNsYXNzPSJzdDMiIGN4PSI5MCIgY3k9IjgwIiByPSIzIi8+PGNpcmNsZSBjbGFzcz0ic3QzIiBjeD0iOTgiIGN5PSI3NSIgcj0iMyIvPjxjaXJjbGUgY2xhc3M9InN0MyIgY3g9IjgzIiBjeT0iNzUiIHI9IjMiLz48Y2lyY2xlIGNsYXNzPSJzdDMiIGN4PSIxMTAiIGN5PSI4MCIgcj0iMTAiLz48L3N2Zz4=";
+
+        const hook = {
+            x: cart.x + cart.width / 2,
+            y: cart.y + cart.height,
+            width: 20,
+            height: 20,
+            speed: 3
+        };
+
+        // Items to collect or avoid
+        let items = [];
+
+        // Keyboard controls
+        const keys = {
+            left: false,
+            right: false,
+            space: false
+        };
+
+        // Event listeners
+        window.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowLeft") keys.left = true;
+            if (e.key === "ArrowRight") keys.right = true;
+            if (e.key === " " && !keys.space) {
+                keys.space = true;
+                if (!gameState.isHookDropping && !gameState.isHookRetracting) {
+                    gameState.isHookDropping = true;
+                } else if (gameState.isHookRetracting) {
+                    // Do nothing, let it retract
+                }
+            }
+        });
+
+        window.addEventListener("keyup", (e) => {
+            if (e.key === "ArrowLeft") keys.left = false;
+            if (e.key === "ArrowRight") keys.right = false;
+            if (e.key === " ") keys.space = false;
+        });
+
+        restartButton.addEventListener("click", () => {
+            resetGame();
+            gameOverScreen.style.display = "none";
+        });
+
+        nextLevelButton.addEventListener("click", () => {
+            levelCompleteScreen.style.display = "none";
+            startNextLevel();
+        });
+
+        // Initialize the game
+        function initializeGame() {
+            generateItems();
+            resetHook();
+            startTimer();
+        }
+
+        // Generate items (gold and stones)
+        function generateItems() {
+            items = [];
+            const numItems = 10 + (gameState.level * 2);
+            
+            for (let i = 0; i < numItems; i++) {
+                const isGold = Math.random() > 0.3; // 70% chance of gold, 30% chance of stone
+                items.push({
+                    x: 50 + Math.random() * (canvas.width - 100),
+                    y: 150 + Math.random() * (canvas.height - 200),
+                    width: isGold ? 30 : 40,
+                    height: isGold ? 20 : 40,
+                    type: isGold ? 'gold' : 'stone',
+                    value: isGold ? 100 : 0,
+                    collected: false
+                });
+            }
+        }
+
+        // Reset hook position
+        function resetHook() {
+            gameState.isHookDropping = false;
+            gameState.isHookRetracting = false;
+            gameState.isHookCarrying = null;
+            gameState.hookExtension = 0;
+        }
+
+        // Start game timer
+        function startTimer() {
+            if (gameState.timerInterval) {
+                clearInterval(gameState.timerInterval);
+            }
+            gameState.timerInterval = setInterval(() => {
+                if (!gameState.isPaused) {
+                    gameState.timeRemaining--;
+                    timerDisplay.textContent = gameState.timeRemaining;
+                    
+                    if (gameState.timeRemaining <= 0) {
+                        // Time's up!
+                        clearInterval(gameState.timerInterval);
+                        endGame(true);
+                    }
+                }
+            }, 1000);
+        }
+
+        // Update game state
+        function update() {
+            if (gameState.isGameOver || gameState.isPaused) return;
+
+            // Update cart position
+            if (keys.left) {
+                cart.x -= cart.speed;
+                cart.direction = -1;
+            }
+            if (keys.right) {
+                cart.x += cart.speed;
+                cart.direction = 1;
+            }
+
+            // Keep cart within bounds
+            if (cart.x < 0) cart.x = 0;
+            if (cart.x + cart.width > canvas.width) cart.x = canvas.width - cart.width;
+
+            // Update miner position
+            miner.x = cart.x + (cart.direction === 1 ? 10 : cart.width - miner.width - 10);
+            miner.y = cart.y + 10;
+
+            // Update hook base position
+            hook.x = cart.x + cart.width / 2 - hook.width / 2;
+
+            // Handle hook dropping and retracting
+            if (gameState.isHookDropping) {
+                gameState.hookExtension += hook.speed;
+                
+                if (gameState.hookExtension >= gameState.maxHookExtension) {
+                    gameState.isHookDropping = false;
+                    gameState.isHookRetracting = true;
+                }
+                
+                // Check for item collection
+                checkItemCollection();
+            } else if (gameState.isHookRetracting) {
+                gameState.hookExtension -= hook.speed;
+                
+                if (gameState.hookExtension <= 0) {
+                    // Hook is fully retracted
+                    gameState.hookExtension = 0;
+                    gameState.isHookRetracting = false;
+                    
+                    // If carrying gold, add to score
+                    if (gameState.isHookCarrying && gameState.isHookCarrying.type === 'gold') {
+                        gameState.score += gameState.isHookCarrying.value;
+                        scoreDisplay.textContent = gameState.score;
+                    }
+                    
+                    gameState.isHookCarrying = null;
+                }
+            }
+
+            // Check if all gold is collected
+            const remainingGold = items.filter(item => item.type === 'gold' && !item.collected);
+            if (remainingGold.length === 0) {
+                // Level complete!
+                clearInterval(gameState.timerInterval);
+                levelComplete();
+            }
+        }
+
+        // Check for item collection
+        function checkItemCollection() {
+            if (gameState.isHookCarrying) return;
+            
+            const hookY = cart.y + cart.height + gameState.hookExtension;
+            
+            items.forEach(item => {
+                if (!item.collected && 
+                    hook.x + hook.width > item.x && 
+                    hook.x < item.x + item.width && 
+                    hookY + hook.height > item.y && 
+                    hookY < item.y + item.height) {
+                    
+                    item.collected = true;
+                    gameState.isHookCarrying = item;
+                    gameState.isHookDropping = false;
+                    gameState.isHookRetracting = true;
+                    
+                    if (item.type === 'stone') {
+                        // Hit a stone, lose a life
+                        gameState.lives--;
+                        livesDisplay.textContent = gameState.lives;
+                        
+                        if (gameState.lives <= 0) {
+                            // Game over!
+                            endGame(false);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Render the game
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw ground
+            ctx.fillStyle = "#8B4513";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw cave background
+            ctx.fillStyle = "#3b2314";
+            for (let i = 0; i < 10; i++) {
+                ctx.beginPath();
+                ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 
+                         Math.random() * 20 + 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw items
+            items.forEach(item => {
+                if (!item.collected) {
+                    if (item.type === 'gold') {
+                        ctx.fillStyle = "#FFD700";
+                        ctx.beginPath();
+                        ctx.roundRect(item.x, item.y, item.width, item.height, 5);
+                        ctx.fill();
+                        
+                        // Gold shine
+                        ctx.fillStyle = "#FFFF00";
+                        ctx.beginPath();
+                        ctx.arc(item.x + 10, item.y + 5, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else {
+                        // Stone
+                        ctx.fillStyle = "#808080";
+                        ctx.beginPath();
+                        ctx.roundRect(item.x, item.y, item.width, item.height, 8);
+                        ctx.fill();
+                        
+                        // Stone details
+                        ctx.strokeStyle = "#606060";
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(item.x + 10, item.y + 10);
+                        ctx.lineTo(item.x + 30, item.y + 15);
+                        ctx.stroke();
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(item.x + 15, item.y + 25);
+                        ctx.lineTo(item.x + 25, item.y + 30);
+                        ctx.stroke();
+                    }
+                }
+            });
+            
+            // Draw cart
+            ctx.fillStyle = "#8B4513";
+            ctx.fillRect(cart.x, cart.y, cart.width, cart.height);
+            ctx.fillStyle = "#A0522D";
+            ctx.fillRect(cart.x + 5, cart.y + 5, cart.width - 10, cart.height - 10);
+            
+            // Draw wheels
+            ctx.fillStyle = "#333";
+            ctx.beginPath();
+            ctx.arc(cart.x + 20, cart.y + cart.height, 10, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(cart.x + cart.width - 20, cart.y + cart.height, 10, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw miner
+            if (miner.image.complete) {
+                ctx.save();
+                if (cart.direction === -1) {
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(miner.image, -miner.x - miner.width, miner.y, miner.width, miner.height);
+                } else {
+                    ctx.drawImage(miner.image, miner.x, miner.y, miner.width, miner.height);
+                }
+                ctx.restore();
+            }
+            
+            // Draw hook and rope
+            const hookY = cart.y + cart.height + gameState.hookExtension;
+            
+            // Draw rope
+            ctx.strokeStyle = "#000";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(hook.x + hook.width / 2, cart.y + cart.height);
+            ctx.lineTo(hook.x + hook.width / 2, hookY);
+            ctx.stroke();
+            
+            // Draw hook
+            ctx.fillStyle = "#444";
+            ctx.beginPath();
+            ctx.arc(hook.x + hook.width / 2, hookY + hook.height / 2, hook.width / 2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw hook details (C shape)
+            ctx.strokeStyle = "#222";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(hook.x + hook.width / 2, hookY + hook.height / 2, 
+                    hook.width / 2 - 2, Math.PI * 0.8, Math.PI * 2.2);
+            ctx.stroke();
+            
+            // Draw carried item if any
+            if (gameState.isHookCarrying) {
+                const item = gameState.isHookCarrying;
+                if (item.type === 'gold') {
+                    ctx.fillStyle = "#FFD700";
+                    ctx.fillRect(hook.x, hookY + hook.height, item.width / 2, item.height / 2);
+                } else {
+                    // Draw stone explosion if carrying a stone
+                    ctx.fillStyle = "#FF4500";
+                    for (let i = 0; i < 8; i++) {
+                        const angle = (Math.PI * 2 / 8) * i;
+                        const x = hook.x + hook.width / 2 + Math.cos(angle) * 15;
+                        const y = hookY + Math.sin(angle) * 15;
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(hook.x + hook.width / 2, hookY + hook.height / 2);
+                        ctx.lineTo(x, y);
+                        ctx.stroke();
+                        
+                        ctx.beginPath();
+                        ctx.arc(x, y, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        // Game loop
+        function gameLoop() {
+            update();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // End game
+        function endGame(timeUp) {
+            gameState.isGameOver = true;
+            clearInterval(gameState.timerInterval);
+            
+            finalScoreDisplay.textContent = gameState.score;
+            gameOverScreen.style.display = "block";
+        }
+
+        // Level complete
+        function levelComplete() {
+            gameState.isPaused = true;
+            
+            levelScoreDisplay.textContent = gameState.score;
+            levelCompleteScreen.style.display = "block";
+        }
+
+        // Start next level
+        function startNextLevel() {
+            gameState.level++;
+            gameState.isPaused = false;
+            gameState.timeRemaining = 60;
+            timerDisplay.textContent = gameState.timeRemaining;
+            
+            resetHook();
+            generateItems();
+            startTimer();
+        }
+
+        // Reset game
+        function resetGame() {
+            gameState = {
+                score: 0,
+                lives: 5,
+                level: 1,
+                timeRemaining: 60,
+                isGameOver: false,
+                isPaused: false,
+                isHookDropping: false,
+                isHookRetracting: false,
+                isHookCarrying: null,
+                hookExtension: 0,
+                maxHookExtension: 400
+            };
+            
+            scoreDisplay.textContent = gameState.score;
+            livesDisplay.textContent = gameState.lives;
+            timerDisplay.textContent = gameState.timeRemaining;
+            
+            cart.x = canvas.width / 2 - 50;
+            cart.y = 50;
+            cart.direction = 1;
+            
+            resetHook();
+            generateItems();
+            startTimer();
+        }
+
+        // Start the game
+        initializeGame();
+        gameLoop();
+    </script>
+</body>
+</html>
